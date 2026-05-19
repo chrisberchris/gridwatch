@@ -838,7 +838,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow-x:
 // ════════════════════════════════════════════════
 // ⚙️  API KEYS — REPLACE THESE WITH YOUR REAL KEYS
 // ════════════════════════════════════════════════
-const GNEWS_KEY      = '78d7003cef28777813612286d1f2b41e';      // get free key at gnews.io
+const GNEWS_KEY      = 'YOUR_GNEWS_KEY_HERE';      // get free key at gnews.io
 // Representative lookup uses whoismyrepresentative.com — no API key needed!
 // ════════════════════════════════════════════════
 
@@ -1252,104 +1252,82 @@ async function lookupReps(){
   setStep(2);
 
   try{
-    // whoismyrepresentative.com — free, no API key required
-    const url=`https://whoismyrepresentative.com/getall_mems.php?zip=${zip}&output=json`;
-    const r=await fetch(url);
-
-    if(!r.ok){
-      // Fallback to unitedstates.io if first source fails
-      await lookupRepsUnitedStates(zip);
-      return;
-    }
-
-    const data=await r.json();
+    // Use Google Civic Information API via a CORS proxy
+    const proxyUrl=`https://api.allorigins.win/get?url=${encodeURIComponent('https://whoismyrepresentative.com/getall_mems.php?zip='+zip+'&output=json')}`;
+    const r=await fetch(proxyUrl);
+    const wrapper=await r.json();
+    const data=JSON.parse(wrapper.contents);
     const results=data.results||[];
 
     if(!results.length){
-      await lookupRepsUnitedStates(zip);
+      showManualFallback(zip);
       return;
     }
 
-    // Map to our rep format
-    const reps=results.map(r=>({
-      office:r.district?`U.S. House — District ${r.district}`:'U.S. Senate',
-      name:r.name,
-      party:r.party==='R'?'Republican':r.party==='D'?'Democrat':r.party||'',
+    const reps=results.map(m=>({
+      office:m.district?'U.S. House of Representatives':'U.S. Senate',
+      name:m.name,
+      party:m.party==='R'?'Republican':m.party==='D'?'Democrat':m.party||'',
       photo:null,
-      phones:[r.phone||''].filter(Boolean),
-      urls:[r.link||''].filter(Boolean),
+      phones:[m.phone||''].filter(Boolean),
+      urls:[m.link||''].filter(Boolean),
       channels:[],
-      address:r.office||'',
-      state:r.state||'',
+      address:m.office||'',
+      district:m.district||'',
+      state:m.state||'',
     }));
 
-    // Also fetch state reps via Open States
-    const stateReps=await fetchStateReps(zip,results[0]?.state||'');
-    const allReps=[...reps,...stateReps];
-
-    if(!allReps.length){
-      showRepError('No representatives found for zip code '+zip+'. Please try the manual lookup below.');
-      return;
+    // Add state rep finder link
+    const stateAbbr=results[0]?.state||'';
+    if(stateAbbr){
+      reps.push({
+        office:'State Legislators',
+        name:'Find Your State Reps →',
+        party:'',
+        photo:null,
+        phones:[],
+        urls:[`https://openstates.org/find_your_legislator/?address=${zip}`],
+        channels:[],
+        address:'',
+        isLink:true,
+      });
     }
 
-    renderReps(allReps);
+    renderReps(reps);
     setStep(2);
 
   }catch(e){
     console.error('Rep lookup error:',e);
-    await lookupRepsUnitedStates(zip);
+    showManualFallback(zip);
   }finally{
     btn.disabled=false;btn.textContent='Look Up →';
   }
 }
 
-async function lookupRepsUnitedStates(zip){
-  // Fallback: unitedstates.io Congress API + manual state links
-  try{
-    const r=await fetch(`https://api.unitedstates.io/congress/members/zipcode/${zip}.json`);
-    if(!r.ok)throw new Error('unitedstates.io failed');
-    const data=await r.json();
-    const members=data.results||[];
-    if(!members.length){
-      showRepError('Could not find representatives for zip code '+zip+'. Please use the manual state lookup below.');
-      return;
-    }
-    const reps=members.map(m=>({
-      office:m.chamber==='senate'?'U.S. Senate':'U.S. House of Representatives',
-      name:(m.first_name||'')+' '+(m.last_name||''),
-      party:m.party==='R'?'Republican':m.party==='D'?'Democrat':m.party||'',
-      photo:null,
-      phones:[m.phone||''].filter(Boolean),
-      urls:[m.url||m.website||''].filter(Boolean),
-      channels:[],
-      address:'',
-    }));
-    renderReps(reps);
-    setStep(2);
-  }catch(e){
-    showRepError('Unable to automatically find your representatives. Please use the manual state lookup below to find and contact your officials directly.');
-  }
+function showManualFallback(zip){
+  // Show helpful manual links instead of an error
+  document.getElementById('rep-results').innerHTML=`
+    <div style="background:var(--ink3);border:1px solid var(--rule2);padding:1.2rem;margin-bottom:0.75rem">
+      <div style="font-family:var(--mono);font-size:0.6rem;color:var(--amber);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">Automatic lookup unavailable — use direct links below</div>
+      <p style="font-size:0.78rem;color:var(--soft);line-height:1.6;margin-bottom:1rem">Find your representatives using these official government sources, then copy your letter from the right panel and paste it into their contact form.</p>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <a href="https://www.senate.gov/senators/senators-contact.htm" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.72rem;display:block">
+          ✉ Find Your U.S. Senators → senate.gov
+        </a>
+        <a href="https://www.house.gov/representatives/find-your-representative#zip=${zip||''}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.72rem;display:block">
+          ✉ Find Your U.S. House Rep → house.gov
+        </a>
+        <a href="https://www.nga.org/governors/" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.72rem;display:block">
+          ✉ Find Your Governor → nga.org
+        </a>
+        <a href="https://openstates.org/find_your_legislator/?address=${zip||''}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.72rem;display:block">
+          ✉ Find Your State Legislators → openstates.org
+        </a>
+      </div>
+    </div>`;
+  setStep(2);
 }
 
-async function fetchStateReps(zip,stateAbbr){
-  // Use Open States API for state-level reps (no key needed for basic lookup)
-  try{
-    if(!stateAbbr)return[];
-    // Use Google Civic as last resort for state — skip if still broken
-    // Instead provide direct links to state legislature
-    return[{
-      office:`${stateAbbr} State Legislature`,
-      name:'Your State Legislators',
-      party:'',
-      photo:null,
-      phones:[],
-      urls:[`https://openstates.org/find_your_legislator/?lat=0&lon=0&address=${zip}`],
-      channels:[],
-      address:'',
-      isStateLink:true,
-    }];
-  }catch(e){return[]}
-}
 
 function renderReps(reps){
   document.getElementById('rep-results').innerHTML=reps.map((rep,i)=>{
