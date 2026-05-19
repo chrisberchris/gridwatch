@@ -554,7 +554,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow-x:
     <!-- API key notice (shown until key is set) -->
     <div class="api-notice" id="news-api-notice">
       <div class="api-notice-icon">⚙️</div>
-      <p><strong>NewsAPI key needed for live headlines.</strong> This section is showing sample articles. To enable live news: get a free key at <a href="https://newsapi.org" target="_blank">newsapi.org</a>, then open index.html and replace <code>YOUR_NEWSAPI_KEY_HERE</code> near the top of the script. Takes 2 minutes. <a href="#" onclick="dismissNewsNotice()">Dismiss and use sample data →</a></p>
+      <p><strong>GNews API key needed for live headlines.</strong> This section is showing sample articles. To enable live news: get a free key at <a href="https://gnews.io" target="_blank">gnews.io</a> (free, real-time), then open index.html and replace <code>YOUR_GNEWS_KEY_HERE</code> near the top of the script. Takes 2 minutes. <a href="#" onclick="dismissNewsNotice()">Dismiss and use sample data →</a></p>
     </div>
 
     <div class="news-grid-header">
@@ -604,20 +604,9 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow-x:
           <p>Powered by Google Civic Information API — covers all 50 states, federal and state officials.</p>
         </div>
         <div class="panel-body">
-          <div id="no-key-state" class="no-key-state">
+          <div id="no-key-state" class="no-key-state" style="display:none">
             <div class="nk-icon">🔑</div>
-            <h4>Google Civic API Key Needed</h4>
-            <p>To automatically look up representatives by zip code, you need a free Google API key. It takes about 5 minutes:</p>
-            <div class="nk-steps">
-              <div class="nk-step"><b>1.</b> Go to <a href="https://console.cloud.google.com" target="_blank" class="nk-link">console.cloud.google.com</a></div>
-              <div class="nk-step"><b>2.</b> Create a new project (name it "GridWatch")</div>
-              <div class="nk-step"><b>3.</b> Go to APIs &amp; Services → Enable APIs</div>
-              <div class="nk-step"><b>4.</b> Search for and enable <strong>"Civic Information API"</strong></div>
-              <div class="nk-step"><b>5.</b> Go to Credentials → Create API Key → Copy it</div>
-              <div class="nk-step"><b>6.</b> In index.html replace <code>YOUR_CIVIC_API_KEY_HERE</code> with your key</div>
-            </div>
-            <p style="font-size:0.75rem;color:var(--mid)">The Civic API is free with 25,000 requests/day — more than enough.</p>
-            <button class="btn-sec" style="margin-top:0.5rem" onclick="useFallbackLookup()">Use Manual Lookup Instead →</button>
+            <h4>Loading representative lookup…</h4>
           </div>
 
           <div id="zip-lookup-state" style="display:none">
@@ -849,8 +838,8 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow-x:
 // ════════════════════════════════════════════════
 // ⚙️  API KEYS — REPLACE THESE WITH YOUR REAL KEYS
 // ════════════════════════════════════════════════
-const NEWSAPI_KEY    = 'ca9dad45048a45aa8f7c09f50494a97d';
-const CIVIC_API_KEY  = 'AIzaSyD-gtYZDD5RydflzFFHumtGweS8WOlh3oA';
+const GNEWS_KEY      = 'YOUR_GNEWS_KEY_HERE';      // get free key at gnews.io
+// Representative lookup uses whoismyrepresentative.com — no API key needed!
 // ════════════════════════════════════════════════
 
 // ── FACILITY DATA ────────────────────────────────
@@ -928,10 +917,9 @@ window.onload=()=>{
 };
 
 function checkApiKeys(){
-  if(CIVIC_API_KEY!=='YOUR_CIVIC_API_KEY_HERE'){
-    document.getElementById('no-key-state').style.display='none';
-    document.getElementById('zip-lookup-state').style.display='block';
-  }
+  // whoismyrepresentative.com requires no API key — always show zip lookup
+  document.getElementById('no-key-state').style.display='none';
+  document.getElementById('zip-lookup-state').style.display='block';
 }
 
 function setCounts(){
@@ -1163,30 +1151,49 @@ function renderNews(){
 function loadMoreNews(){newsPage++;renderNews()}
 
 async function fetchLiveNews(){
-  if(NEWSAPI_KEY==='YOUR_NEWSAPI_KEY_HERE'){
-    // Use sample data
+  if(GNEWS_KEY==='YOUR_GNEWS_KEY_HERE'){
     allNewsArticles=[];
     renderNews();
     return;
   }
   try{
     document.getElementById('news-grid').innerHTML='<div class="news-loading"><div class="spinner"></div><span style="font-family:var(--mono);font-size:0.72rem;color:var(--mid)">Fetching live headlines…</span></div>';
-    const queries=['data center water','data center power grid','data center community impact','hyperscale data center permit','data center environmental','data center zoning'];
+    const queries=[
+      'data center water environment',
+      'data center power grid community',
+      'hyperscale data center permit zoning',
+    ];
     const results=[];
-    for(const q of queries.slice(0,2)){
-      const url=`https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=20&apiKey=${NEWSAPI_KEY}`;
+    for(const q of queries){
+      const url=`https://gnews.io/api/v4/search?q=${encodeURIComponent(q)}&lang=en&country=us&max=10&sortby=publishedAt&apikey=${GNEWS_KEY}`;
       const r=await fetch(url);
+      if(!r.ok)continue;
       const d=await r.json();
-      if(d.articles)results.push(...d.articles);
+      if(d.articles){
+        const normalized=d.articles.map(a=>({
+          title:a.title,
+          description:a.description,
+          url:a.url,
+          urlToImage:a.image||null,
+          publishedAt:a.publishedAt,
+          source:a.source?.name||'',
+          state:detectState((a.title||'')+' '+(a.description||'')),
+        }));
+        results.push(...normalized);
+      }
     }
-    // Deduplicate and enrich with state detection
     const seen=new Set();
     allNewsArticles=results
-      .filter(a=>{if(seen.has(a.title))return false;seen.add(a.title);return true})
-      .map(a=>({...a,source:a.source?.name||'',state:detectState(a.title+' '+a.description+' '+a.content)}));
+      .filter(a=>{
+        if(!a.title||seen.has(a.title))return false;
+        seen.add(a.title);
+        return true;
+      })
+      .sort((a,b)=>new Date(b.publishedAt)-new Date(a.publishedAt));
     document.getElementById('news-api-notice').style.display='none';
     renderNews();
   }catch(e){
+    console.error('GNews fetch error:',e);
     allNewsArticles=[];
     renderNews();
   }
@@ -1245,54 +1252,103 @@ async function lookupReps(){
   setStep(2);
 
   try{
-    const url=`https://www.googleapis.com/civicinfo/v2/representatives?address=${zip}&key=${CIVIC_API_KEY}`;
+    // whoismyrepresentative.com — free, no API key required
+    const url=`https://whoismyrepresentative.com/getall_mems.php?zip=${zip}&output=json`;
     const r=await fetch(url);
+
+    if(!r.ok){
+      // Fallback to unitedstates.io if first source fails
+      await lookupRepsUnitedStates(zip);
+      return;
+    }
+
     const data=await r.json();
+    const results=data.results||[];
 
-    if(data.error){
-      showRepError('API error: '+data.error.message+'. Please check your Civic API key.');
+    if(!results.length){
+      await lookupRepsUnitedStates(zip);
       return;
     }
 
-    const offices=data.offices||[];
-    const officials=data.officials||[];
-    const reps=[];
+    // Map to our rep format
+    const reps=results.map(r=>({
+      office:r.district?`U.S. House — District ${r.district}`:'U.S. Senate',
+      name:r.name,
+      party:r.party==='R'?'Republican':r.party==='D'?'Democrat':r.party||'',
+      photo:null,
+      phones:[r.phone||''].filter(Boolean),
+      urls:[r.link||''].filter(Boolean),
+      channels:[],
+      address:r.office||'',
+      state:r.state||'',
+    }));
 
-    offices.forEach(office=>{
-      if(!office.officialIndices)return;
-      // Filter to relevant offices
-      const relevant=['United States Senate','United States House','Governor','State Senate','State House','State Assembly','State Legislature'];
-      const isRelevant=relevant.some(r=>office.name.includes(r));
-      if(!isRelevant)return;
-      office.officialIndices.forEach(idx=>{
-        const o=officials[idx];
-        if(!o)return;
-        reps.push({
-          office:office.name,
-          name:o.name,
-          party:o.party||'',
-          photo:o.photoUrl||null,
-          phones:(o.phones||[]),
-          urls:(o.urls||[]),
-          channels:(o.channels||[]),
-          address:(o.address||[]).map(a=>`${a.line1||''} ${a.city||''}, ${a.state||''} ${a.zip||''}`).join('; '),
-        });
-      });
-    });
+    // Also fetch state reps via Open States
+    const stateReps=await fetchStateReps(zip,results[0]?.state||'');
+    const allReps=[...reps,...stateReps];
 
-    if(reps.length===0){
-      showRepError('No representatives found for this zip code. Try a nearby zip or use the manual lookup below.');
+    if(!allReps.length){
+      showRepError('No representatives found for zip code '+zip+'. Please try the manual lookup below.');
       return;
     }
 
-    renderReps(reps);
+    renderReps(allReps);
     setStep(2);
 
   }catch(e){
-    showRepError('Could not reach the Civic Information API. Check your internet connection and API key.');
+    console.error('Rep lookup error:',e);
+    await lookupRepsUnitedStates(zip);
   }finally{
     btn.disabled=false;btn.textContent='Look Up →';
   }
+}
+
+async function lookupRepsUnitedStates(zip){
+  // Fallback: unitedstates.io Congress API + manual state links
+  try{
+    const r=await fetch(`https://api.unitedstates.io/congress/members/zipcode/${zip}.json`);
+    if(!r.ok)throw new Error('unitedstates.io failed');
+    const data=await r.json();
+    const members=data.results||[];
+    if(!members.length){
+      showRepError('Could not find representatives for zip code '+zip+'. Please use the manual state lookup below.');
+      return;
+    }
+    const reps=members.map(m=>({
+      office:m.chamber==='senate'?'U.S. Senate':'U.S. House of Representatives',
+      name:(m.first_name||'')+' '+(m.last_name||''),
+      party:m.party==='R'?'Republican':m.party==='D'?'Democrat':m.party||'',
+      photo:null,
+      phones:[m.phone||''].filter(Boolean),
+      urls:[m.url||m.website||''].filter(Boolean),
+      channels:[],
+      address:'',
+    }));
+    renderReps(reps);
+    setStep(2);
+  }catch(e){
+    showRepError('Unable to automatically find your representatives. Please use the manual state lookup below to find and contact your officials directly.');
+  }
+}
+
+async function fetchStateReps(zip,stateAbbr){
+  // Use Open States API for state-level reps (no key needed for basic lookup)
+  try{
+    if(!stateAbbr)return[];
+    // Use Google Civic as last resort for state — skip if still broken
+    // Instead provide direct links to state legislature
+    return[{
+      office:`${stateAbbr} State Legislature`,
+      name:'Your State Legislators',
+      party:'',
+      photo:null,
+      phones:[],
+      urls:[`https://openstates.org/find_your_legislator/?lat=0&lon=0&address=${zip}`],
+      channels:[],
+      address:'',
+      isStateLink:true,
+    }];
+  }catch(e){return[]}
 }
 
 function renderReps(reps){
@@ -1490,7 +1546,7 @@ function nav(tab){
   });
   window.scrollTo({top:0,behavior:'smooth'});
   // Lazy load news when first opened
-  if(tab==='news'&&allNewsArticles.length===0&&NEWSAPI_KEY==='YOUR_NEWSAPI_KEY_HERE'){
+  if(tab==='news'&&allNewsArticles.length===0&&GNEWS_KEY==='YOUR_GNEWS_KEY_HERE'){
     renderNews();
   } else if(tab==='news'&&allNewsArticles.length===0){
     fetchLiveNews();
