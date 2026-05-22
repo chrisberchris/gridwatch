@@ -838,7 +838,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow-x:
 // ════════════════════════════════════════════════
 // ⚙️  API KEYS — REPLACE THESE WITH YOUR REAL KEYS
 // ════════════════════════════════════════════════
-const GNEWS_KEY      = 'YOUR_GNEWS_KEY_HERE';      // get free key at gnews.io
+const GNEWS_KEY      = '78d7003cef28777813612286d1f2b41e';      // get free key at gnews.io
 // Representative lookup uses whoismyrepresentative.com — no API key needed!
 // ════════════════════════════════════════════════
 
@@ -1280,7 +1280,7 @@ function renderNews(){
 function loadMoreNews(){newsPage++;renderNews()}
 
 async function fetchLiveNews(){
-  if(GNEWS_KEY==='YOUR_GNEWS_KEY_HERE'){
+  if(GNEWS_KEY==='78d7003cef28777813612286d1f2b41e'){
     allNewsArticles=[];
     renderNews();
     return;
@@ -1653,7 +1653,7 @@ function nav(tab){
   });
   window.scrollTo({top:0,behavior:'smooth'});
   // Lazy load news when first opened
-  if(tab==='news'&&allNewsArticles.length===0&&GNEWS_KEY==='YOUR_GNEWS_KEY_HERE'){
+  if(tab==='news'&&allNewsArticles.length===0&&GNEWS_KEY==='78d7003cef28777813612286d1f2b41e'){
     renderNews();
   } else if(tab==='news'&&allNewsArticles.length===0){
     fetchLiveNews();
