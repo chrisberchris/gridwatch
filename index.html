@@ -552,10 +552,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow-x:
 
   <div class="news-main">
     <!-- API key notice (shown until key is set) -->
-    <div class="api-notice" id="news-api-notice">
-      <div class="api-notice-icon">⚙️</div>
-      <p><strong>GNews API key needed for live headlines.</strong> This section is showing sample articles. To enable live news: get a free key at <a href="https://gnews.io" target="_blank">gnews.io</a> (free, real-time), then open index.html and replace <code>YOUR_GNEWS_KEY_HERE</code> near the top of the script. Takes 2 minutes. <a href="#" onclick="dismissNewsNotice()">Dismiss and use sample data →</a></p>
-    </div>
+    <div class="api-notice" id="news-api-notice" style="display:none"></div>
 
     <div class="news-grid-header">
       <h2>Latest Headlines — <em id="news-state-label">All States</em></h2>
@@ -1043,6 +1040,8 @@ window.onload=()=>{
   buildTicker();
   buildStateFilterPills();
   checkApiKeys();
+  // Pre-fetch news so it's ready when user clicks
+  setTimeout(fetchLiveNews, 500);
 };
 
 function checkApiKeys(){
@@ -1280,7 +1279,7 @@ function renderNews(){
 function loadMoreNews(){newsPage++;renderNews()}
 
 async function fetchLiveNews(){
-  if(GNEWS_KEY==='YOUR_GNEWS_KEY_HERE'){
+  if(false){ // key is set
     allNewsArticles=[];
     renderNews();
     return;
@@ -1653,9 +1652,7 @@ function nav(tab){
   });
   window.scrollTo({top:0,behavior:'smooth'});
   // Lazy load news when first opened
-  if(tab==='news'&&allNewsArticles.length===0&&GNEWS_KEY==='YOUR_GNEWS_KEY_HERE'){
-    renderNews();
-  } else if(tab==='news'&&allNewsArticles.length===0){
+  if(tab==='news'&&allNewsArticles.length===0){
     fetchLiveNews();
   }
   // Init letter
