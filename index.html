@@ -1022,6 +1022,11 @@ const DC=[
 ];
 
 
+// ── CONGRESS.GOV API KEY ─────────────────────────
+// Paste your Congress.gov API key here for automatic rep lookup
+window.CONGRESS_API_KEY = 'YOUR_CONGRESS_API_KEY_HERE';
+// ─────────────────────────────────────────────────
+
 // ── STATE ────────────────────────────────────────
 const US_STATES=['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming'];
 const STATE_ABBR={'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA','Colorado':'CO','Connecticut':'CT','Delaware':'DE','Florida':'FL','Georgia':'GA','Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS','Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA','Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT','Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM','New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK','Oregon':'OR','Pennsylvania':'PA','Rhode Island':'PA','South Carolina':'SC','South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT','Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY'};
@@ -1375,50 +1380,105 @@ async function lookupReps(){
   if(zip.length!==5){showToast('Please enter a valid 5-digit zip code.');return}
 
   const btn=document.getElementById('zip-btn');
-  btn.disabled=true;btn.textContent='Looking up…';
-  document.getElementById('rep-results').innerHTML='<div class="lookup-loading"><div class="spinner"></div><span>Finding your representatives…</span></div>';
+  btn.disabled=true;btn.textContent='Looking up\u2026';
+  document.getElementById('rep-results').innerHTML='<div class="lookup-loading"><div class="spinner"></div><span>Finding your representatives\u2026</span></div>';
   setStep(2);
 
   try{
-    // Use Google Civic Information API via a CORS proxy
-    const proxyUrl=`https://api.allorigins.win/get?url=${encodeURIComponent('https://whoismyrepresentative.com/getall_mems.php?zip='+zip+'&output=json')}`;
-    const r=await fetch(proxyUrl);
-    const wrapper=await r.json();
-    const data=JSON.parse(wrapper.contents);
-    const results=data.results||[];
+    // Step 1: Convert ZIP to state + district using Census Geocoder (no key, CORS friendly)
+    const geoUrl=`https://geocoding.geo.census.gov/geocoder/geographies/address?street=&city=&state=&zip=${zip}&benchmark=Public_AR_Current&vintage=Current_Current&layers=Congressional+Districts&format=json`;
+    const geoRes=await fetch(geoUrl);
+    const geoData=await geoRes.json();
 
-    if(!results.length){
-      showManualFallback(zip);
-      return;
+    const matches=geoData?.result?.addressMatches||[];
+    let stateAbbr='',district='';
+
+    if(matches.length>0){
+      const geos=matches[0].geographies;
+      const cd=geos?.['Congressional Districts']?.[0];
+      const state=geos?.['States']?.[0];
+      if(cd){district=cd.BASENAME||cd.NAME||''}
+      if(state){stateAbbr=state.STUSAB||''}
     }
 
-    const reps=results.map(m=>({
-      office:m.district?'U.S. House of Representatives':'U.S. Senate',
-      name:m.name,
-      party:m.party==='R'?'Republican':m.party==='D'?'Democrat':m.party||'',
-      photo:null,
-      phones:[m.phone||''].filter(Boolean),
-      urls:[m.link||''].filter(Boolean),
-      channels:[],
-      address:m.office||'',
-      district:m.district||'',
-      state:m.state||'',
-    }));
+    if(!stateAbbr){
+      // Fallback: derive state from ZIP ranges
+      stateAbbr=zipToState(zip);
+    }
 
-    // Add state rep finder link
-    const stateAbbr=results[0]?.state||'';
-    if(stateAbbr){
-      reps.push({
-        office:'State Legislators',
-        name:'Find Your State Reps →',
-        party:'',
-        photo:null,
-        phones:[],
-        urls:[`https://openstates.org/find_your_legislator/?address=${zip}`],
-        channels:[],
-        address:'',
-        isLink:true,
-      });
+    // Step 2: Fetch members from Congress.gov API
+    const CONGRESS_KEY=document.getElementById('congress-api-key')?.value||window.CONGRESS_API_KEY||'';
+
+    let reps=[];
+    if(CONGRESS_KEY){
+      // Fetch senators for state
+      const senUrl=`https://api.congress.gov/v3/member?stateCode=${stateAbbr}&chamber=senate&currentMember=true&limit=5&api_key=${CONGRESS_KEY}`;
+      const senRes=await fetch(senUrl);
+      const senData=await senRes.json();
+      if(senData.members){
+        senData.members.forEach(m=>{
+          reps.push({
+            office:'U.S. Senate — '+stateAbbr,
+            name:(m.name||'').replace(/,\s*/,', '),
+            party:m.partyName||m.party||'',
+            photo:null,
+            phones:[],
+            urls:[m.officialWebsiteUrl||`https://www.congress.gov/member/${(m.name||'').replace(/\s+/g,'-').toLowerCase()}/${m.bioguideId}`],
+            address:'Washington, DC',
+            bioguideId:m.bioguideId||'',
+          });
+        });
+      }
+
+      // Fetch house members for state
+      const houseUrl=`https://api.congress.gov/v3/member?stateCode=${stateAbbr}&chamber=house&currentMember=true&limit=20&api_key=${CONGRESS_KEY}`;
+      const houseRes=await fetch(houseUrl);
+      const houseData=await houseRes.json();
+      if(houseData.members){
+        // Filter to district if we have it
+        const distNum=district.replace(/\D/g,'')||'';
+        houseData.members.forEach(m=>{
+          if(distNum&&m.district&&String(m.district)!==distNum)return;
+          reps.push({
+            office:`U.S. House — ${stateAbbr} District ${m.district||'At Large'}`,
+            name:(m.name||'').replace(/,\s*/,', '),
+            party:m.partyName||m.party||'',
+            photo:null,
+            phones:[],
+            urls:[m.officialWebsiteUrl||`https://www.congress.gov/member/${(m.name||'').replace(/\s+/g,'-').toLowerCase()}/${m.bioguideId}`],
+            address:'Washington, DC',
+            bioguideId:m.bioguideId||'',
+          });
+        });
+      }
+    }
+
+    // Step 3: Always add state-level links and Governor
+    reps.push({
+      office:'Governor',
+      name:'Find Your Governor',
+      party:'',
+      photo:null,
+      phones:[],
+      urls:[`https://www.nga.org/governors/`],
+      address:'',
+      isLink:true,
+    });
+    reps.push({
+      office:'State Legislators',
+      name:'Find Your State Reps',
+      party:'',
+      photo:null,
+      phones:[],
+      urls:[`https://openstates.org/find_your_legislator/?address=${zip}`],
+      address:'',
+      isLink:true,
+    });
+
+    if(reps.length<=2){
+      // Only got generic links - show helpful fallback with state info
+      showManualFallback(zip, stateAbbr);
+      return;
     }
 
     renderReps(reps);
@@ -1426,32 +1486,102 @@ async function lookupReps(){
 
   }catch(e){
     console.error('Rep lookup error:',e);
-    showManualFallback(zip);
+    showManualFallback(zip,'');
   }finally{
-    btn.disabled=false;btn.textContent='Look Up →';
+    btn.disabled=false;btn.textContent='Look Up \u2192';
   }
 }
 
-function showManualFallback(zip){
-  // Show helpful manual links instead of an error
+function zipToState(zip){
+  // ZIP code prefix to state mapping
+  const z=parseInt(zip.slice(0,3));
+  if(z>=988&&z<=994)return'WA';
+  if(z>=995&&z<=999)return'AK';
+  if(z>=967&&z<=968)return'HI';
+  if(z>=969&&z<=969)return'GU';
+  if(z>=970&&z<=979)return'OR';
+  if(z>=980&&z<=987)return'WA';
+  if(z>=900&&z<=966)return'CA';
+  if(z>=850&&z<=865)return'AZ';
+  if(z>=870&&z<=884)return'NM';
+  if(z>=885&&z<=885)return'TX';
+  if(z>=730&&z<=749)return'OK';
+  if(z>=750&&z<=799)return'TX';
+  if(z>=800&&z<=816)return'CO';
+  if(z>=820&&z<=831)return'WY';
+  if(z>=832&&z<=838)return'ID';
+  if(z>=840&&z<=847)return'UT';
+  if(z>=889&&z<=899)return'NV';
+  if(z>=590&&z<=599)return'MT';
+  if(z>=570&&z<=577)return'SD';
+  if(z>=580&&z<=588)return'ND';
+  if(z>=550&&z<=567)return'MN';
+  if(z>=500&&z<=528)return'IA';
+  if(z>=530&&z<=549)return'WI';
+  if(z>=460&&z<=479)return'IN';
+  if(z>=480&&z<=499)return'MI';
+  if(z>=430&&z<=459)return'OH';
+  if(z>=400&&z<=427)return'KY';
+  if(z>=370&&z<=385)return'TN';
+  if(z>=350&&z<=369)return'AL';
+  if(z>=386&&z<=397)return'MS';
+  if(z>=700&&z<=714)return'LA';
+  if(z>=716&&z<=729)return'AR';
+  if(z>=630&&z<=658)return'MO';
+  if(z>=600&&z<=629)return'IL';
+  if(z>=660&&z<=679)return'KS';
+  if(z>=680&&z<=693)return'NE';
+  if(z>=303&&z<=319)return'GA';
+  if(z>=320&&z<=339)return'FL';
+  if(z>=270&&z<=289)return'NC';
+  if(z>=290&&z<=299)return'SC';
+  if(z>=240&&z<=246)return'VA';
+  if(z>=247&&z<=268)return'WV';
+  if(z>=200&&z<=212)return'DC';
+  if(z>=214&&z<=219)return'MD';
+  if(z>=220&&z<=239)return'VA';
+  if(z>=170&&z<=196)return'PA';
+  if(z>=197&&z<=199)return'DE';
+  if(z>=070&&z<=089)return'NJ';
+  if(z>=100&&z<=149)return'NY';
+  if(z>=150&&z<=168)return'PA';
+  if(z>=010&&z<=027)return'MA';
+  if(z>=028&&z<=029)return'RI';
+  if(z>=060&&z<=069)return'CT';
+  if(z>=030&&z<=038)return'NH';
+  if(z>=039&&z<=039)return'ME';
+  if(z>=040&&z<=049)return'ME';
+  if(z>=050&&z<=059)return'VT';
+  return'';
+}
+
+function showManualFallback(zip, stateAbbr){
+  const stateName=Object.entries(STATE_ABBR).find(([k,v])=>v===stateAbbr)?.[0]||'your state';
   document.getElementById('rep-results').innerHTML=`
     <div style="background:var(--ink3);border:1px solid var(--rule2);padding:1.2rem;margin-bottom:0.75rem">
-      <div style="font-family:var(--mono);font-size:0.6rem;color:var(--amber);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">Automatic lookup unavailable — use direct links below</div>
-      <p style="font-size:0.78rem;color:var(--soft);line-height:1.6;margin-bottom:1rem">Find your representatives using these official government sources, then copy your letter from the right panel and paste it into their contact form.</p>
+      <div style="font-family:var(--mono);font-size:0.6rem;color:var(--violet);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">
+        ${stateAbbr?'Representatives for '+stateAbbr+' (ZIP '+zip+')':'Find Your Representatives'}
+      </div>
+      <p style="font-size:0.78rem;color:var(--soft);line-height:1.6;margin-bottom:1rem">
+        Use these official government links to find and contact your representatives, then copy your personalized letter from the right panel.
+      </p>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <a href="https://www.senate.gov/senators/senators-contact.htm" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.72rem;display:block">
-          ✉ Find Your U.S. Senators → senate.gov
+        <a href="https://www.senate.gov/senators/senators-contact.htm" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">
+          \u2709 Find Your U.S. Senators \u2192 senate.gov
         </a>
-        <a href="https://www.house.gov/representatives/find-your-representative#zip=${zip||''}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.72rem;display:block">
-          ✉ Find Your U.S. House Rep → house.gov
+        <a href="https://www.house.gov/representatives/find-your-representative?zip=${zip}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">
+          \u2709 Find Your U.S. House Rep (ZIP ${zip}) \u2192 house.gov
         </a>
-        <a href="https://www.nga.org/governors/" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.72rem;display:block">
-          ✉ Find Your Governor → nga.org
+        <a href="https://www.nga.org/governors/" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">
+          \u2709 Find Your Governor \u2192 nga.org
         </a>
-        <a href="https://openstates.org/find_your_legislator/?address=${zip||''}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.72rem;display:block">
-          ✉ Find Your State Legislators → openstates.org
+        <a href="https://openstates.org/find_your_legislator/?address=${zip}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">
+          \u2709 Find Your State Legislators \u2192 openstates.org
         </a>
       </div>
+      <p style="font-size:0.72rem;color:var(--mid);margin-top:0.75rem;line-height:1.5">
+        \u2139\ufe0f Your letter is ready on the right. Copy it and paste into any contact form above.
+      </p>
     </div>`;
   setStep(2);
 }
