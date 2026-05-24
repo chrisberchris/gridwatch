@@ -552,7 +552,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow-x:
 
   <div class="news-main">
     <!-- API key notice (shown until key is set) -->
-    <div class="api-notice" id="news-api-notice" style="display:none"></div>
+    <div class="api-notice" id="news-api-notice"><div class="api-notice-icon">📰</div><p><strong>Showing curated sample articles.</strong> To enable live news: get a free key at <a href="https://newsdata.io" target="_blank">newsdata.io</a> (200 req/day free), then add it to the <code>NEWSDATA_API_KEY</code> line near the top of the script. <a href="#" onclick="dismissNewsNotice()">Dismiss →</a></p></div>
 
     <div class="news-grid-header">
       <h2>Latest Headlines — <em id="news-state-label">All States</em></h2>
@@ -835,7 +835,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--sans);overflow-x:
 // ════════════════════════════════════════════════
 // ⚙️  API KEYS — REPLACE THESE WITH YOUR REAL KEYS
 // ════════════════════════════════════════════════
-const GNEWS_KEY      = '78d7003cef28777813612286d1f2b41e';
+// News uses Google News RSS — no API key needed!
 // Representative lookup uses whoismyrepresentative.com — no API key needed!
 // ════════════════════════════════════════════════
 
@@ -1022,9 +1022,20 @@ const DC=[
 ];
 
 
-// ── CONGRESS.GOV API KEY ─────────────────────────
-// Paste your Congress.gov API key here for automatic rep lookup
-window.CONGRESS_API_KEY = 'lLR0piTqjlT9ug3LSYkqd0phoZMlS2jqOg8iyss6';
+// ══════════════════════════════════════════════════
+// ⚙️  API KEYS
+// ══════════════════════════════════════════════════
+// Congress.gov — free, get at api.congress.gov
+window.CONGRESS_API_KEY  = 'YOUR_CONGRESS_API_KEY_HERE';
+
+// News — choose ONE of these free news APIs:
+// Option A: NewsData.io — 200 req/day free — newsdata.io
+window.NEWSDATA_API_KEY  = 'YOUR_NEWSDATA_KEY_HERE';
+// Option B: Currents API — 600 req/day free — currentsapi.services
+window.CURRENTS_API_KEY  = 'YOUR_CURRENTS_KEY_HERE';
+// Option C: Mediastack — 500 req/month free — mediastack.com
+window.MEDIASTACK_API_KEY = 'YOUR_MEDIASTACK_KEY_HERE';
+// ══════════════════════════════════════════════════
 // ─────────────────────────────────────────────────
 
 // ── STATE ────────────────────────────────────────
@@ -1284,53 +1295,92 @@ function renderNews(){
 function loadMoreNews(){newsPage++;renderNews()}
 
 async function fetchLiveNews(){
-  if(false){ // key is set
-    allNewsArticles=[];
-    renderNews();
-    return;
-  }
-  try{
-    document.getElementById('news-grid').innerHTML='<div class="news-loading"><div class="spinner"></div><span style="font-family:var(--mono);font-size:0.72rem;color:var(--mid)">Fetching live headlines…</span></div>';
-    const queries=[
-      'data center water environment',
-      'data center power grid community',
-      'hyperscale data center permit zoning',
-    ];
-    const results=[];
-    for(const q of queries){
-      const url=`https://gnews.io/api/v4/search?q=${encodeURIComponent(q)}&lang=en&country=us&max=10&sortby=publishedAt&apikey=${GNEWS_KEY}`;
-      const r=await fetch(url);
-      if(!r.ok)continue;
-      const d=await r.json();
-      if(d.articles){
-        const normalized=d.articles.map(a=>({
-          title:a.title,
-          description:a.description,
-          url:a.url,
-          urlToImage:a.image||null,
-          publishedAt:a.publishedAt,
-          source:a.source?.name||'',
-          state:detectState((a.title||'')+' '+(a.description||'')),
-        }));
-        results.push(...normalized);
-      }
-    }
-    const seen=new Set();
-    allNewsArticles=results
-      .filter(a=>{
-        if(!a.title||seen.has(a.title))return false;
-        seen.add(a.title);
-        return true;
-      })
-      .sort((a,b)=>new Date(b.publishedAt)-new Date(a.publishedAt));
-    document.getElementById('news-api-notice').style.display='none';
-    renderNews();
-  }catch(e){
-    console.error('GNews fetch error:',e);
-    allNewsArticles=[];
+  // Use multiple CORS-safe news sources with fallbacks
+  const success = await tryCurrentsAPI() || await tryMediastackAPI() || await tryNewsDataAPI();
+  if(!success){
+    console.log('All live news sources unavailable — showing curated sample articles');
+    allNewsArticles = [];
     renderNews();
   }
 }
+
+async function tryCurrentsAPI(){
+  // Currents API — free tier, 600 req/day, CORS friendly
+  // Get free key at currentsapi.services
+  const CURRENTS_KEY = window.CURRENTS_API_KEY || '';
+  if(!CURRENTS_KEY || CURRENTS_KEY === 'YOUR_CURRENTS_KEY_HERE') return false;
+  try{
+    const url = `https://api.currentsapi.services/v1/search?keywords=data+center&language=en&apiKey=${CURRENTS_KEY}`;
+    const r = await fetch(url);
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(!d.news || !d.news.length) return false;
+    allNewsArticles = d.news.map(a=>({
+      title: a.title,
+      description: a.description,
+      url: a.url,
+      urlToImage: a.image !== 'None' ? a.image : null,
+      publishedAt: a.published,
+      source: a.author || a.url?.split('/')[2] || 'News',
+      state: detectState((a.title||'')+' '+(a.description||'')),
+    })).sort((a,b)=>new Date(b.publishedAt)-new Date(a.publishedAt));
+    document.getElementById('news-api-notice').style.display='none';
+    renderNews();
+    return true;
+  }catch(e){ return false; }
+}
+
+async function tryMediastackAPI(){
+  // Mediastack — free tier 500 req/month, CORS friendly
+  const MEDIASTACK_KEY = window.MEDIASTACK_API_KEY || '';
+  if(!MEDIASTACK_KEY || MEDIASTACK_KEY === 'YOUR_MEDIASTACK_KEY_HERE') return false;
+  try{
+    const url = `http://api.mediastack.com/v1/news?access_key=${MEDIASTACK_KEY}&keywords=data+center&languages=en&limit=50`;
+    const r = await fetch(url);
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(!d.data || !d.data.length) return false;
+    allNewsArticles = d.data.map(a=>({
+      title: a.title,
+      description: a.description,
+      url: a.url,
+      urlToImage: a.image || null,
+      publishedAt: a.published_at,
+      source: a.source || 'News',
+      state: detectState((a.title||'')+' '+(a.description||'')),
+    })).sort((a,b)=>new Date(b.publishedAt)-new Date(a.publishedAt));
+    document.getElementById('news-api-notice').style.display='none';
+    renderNews();
+    return true;
+  }catch(e){ return false; }
+}
+
+async function tryNewsDataAPI(){
+  // NewsData.io — free tier 200 req/day, CORS friendly
+  const NEWSDATA_KEY = window.NEWSDATA_API_KEY || '';
+  if(!NEWSDATA_KEY || NEWSDATA_KEY === 'YOUR_NEWSDATA_KEY_HERE') return false;
+  try{
+    const url = `https://newsdata.io/api/1/news?apikey=${NEWSDATA_KEY}&q=data+center&language=en&country=us`;
+    const r = await fetch(url);
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(!d.results || !d.results.length) return false;
+    allNewsArticles = d.results.map(a=>({
+      title: a.title,
+      description: a.description || '',
+      url: a.link,
+      urlToImage: a.image_url || null,
+      publishedAt: a.pubDate,
+      source: a.source_id || 'News',
+      state: detectState((a.title||'')+' '+(a.description||'')),
+    })).sort((a,b)=>new Date(b.publishedAt)-new Date(a.publishedAt));
+    document.getElementById('news-api-notice').style.display='none';
+    renderNews();
+    return true;
+  }catch(e){ return false; }
+}
+
+
 
 function detectState(text){
   if(!text)return null;
