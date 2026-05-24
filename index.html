@@ -1030,7 +1030,7 @@ window.CONGRESS_API_KEY  = 'YOUR_CONGRESS_API_KEY_HERE';
 
 // News — choose ONE of these free news APIs:
 // Option A: NewsData.io — 200 req/day free — newsdata.io
-window.NEWSDATA_API_KEY  = 'pub_2d20158ff9944b0f96a5b497a9b31ad8';
+window.NEWSDATA_API_KEY  = 'YOUR_NEWSDATA_KEY_HERE';
 // Option B: Currents API — 600 req/day free — currentsapi.services
 window.CURRENTS_API_KEY  = 'YOUR_CURRENTS_KEY_HERE';
 // Option C: Mediastack — 500 req/month free — mediastack.com
@@ -1310,7 +1310,7 @@ async function tryCurrentsAPI(){
   const CURRENTS_KEY = window.CURRENTS_API_KEY || '';
   if(!CURRENTS_KEY || CURRENTS_KEY === 'YOUR_CURRENTS_KEY_HERE') return false;
   try{
-    const url = `https://api.currentsapi.services/v1/search?keywords=data+center&language=en&apiKey=${CURRENTS_KEY}`;
+    const url = `https://api.currentsapi.services/v1/search?keywords=data+center+hyperscale+water+grid&language=en&apiKey=${CURRENTS_KEY}`;
     const r = await fetch(url);
     if(!r.ok) return false;
     const d = await r.json();
@@ -1335,7 +1335,7 @@ async function tryMediastackAPI(){
   const MEDIASTACK_KEY = window.MEDIASTACK_API_KEY || '';
   if(!MEDIASTACK_KEY || MEDIASTACK_KEY === 'YOUR_MEDIASTACK_KEY_HERE') return false;
   try{
-    const url = `http://api.mediastack.com/v1/news?access_key=${MEDIASTACK_KEY}&keywords=data+center&languages=en&limit=50`;
+    const url = `http://api.mediastack.com/v1/news?access_key=${MEDIASTACK_KEY}&keywords=data center hyperscale&languages=en&limit=50&categories=technology,environment`;
     const r = await fetch(url);
     if(!r.ok) return false;
     const d = await r.json();
@@ -1360,12 +1360,41 @@ async function tryNewsDataAPI(){
   const NEWSDATA_KEY = window.NEWSDATA_API_KEY || '';
   if(!NEWSDATA_KEY || NEWSDATA_KEY === 'YOUR_NEWSDATA_KEY_HERE') return false;
   try{
-    const url = `https://newsdata.io/api/1/news?apikey=${NEWSDATA_KEY}&q=data+center&language=en&country=us`;
+    // Highly targeted data center queries
+    const dcQueries = [
+      'data center water',
+      'data center electricity grid',
+      'hyperscale data center',
+      'data center zoning permit',
+      'data center community impact',
+    ];
+    const allResults = [];
+    for(const q of dcQueries){
+      try{
+        const r2 = await fetch(`https://newsdata.io/api/1/news?apikey=${NEWSDATA_KEY}&q=${encodeURIComponent(q)}&language=en&country=us&category=technology,environment,politics`);
+        if(!r2.ok) continue;
+        const d2 = await r2.json();
+        if(d2.results) allResults.push(...d2.results);
+      }catch(e2){ continue; }
+    }
+    // Deduplicate
+    const seenIds = new Set();
+    const dedupedResults = allResults.filter(a=>{
+      if(!a.title||seenIds.has(a.title)) return false;
+      seenIds.add(a.title);
+      // Filter out unrelated articles
+      const text=(a.title+' '+(a.description||'')).toLowerCase();
+      const dcTerms=['data center','datacenter','hyperscale','colocation','server farm','cloud infrastructure'];
+      return dcTerms.some(t=>text.includes(t));
+    });
+    const url = null; // handled above
+    if(!dedupedResults.length) return false;
+    allNewsArticles = dedupedResults.map(a=>({
     const r = await fetch(url);
     if(!r.ok) return false;
     const d = await r.json();
     if(!d.results || !d.results.length) return false;
-    allNewsArticles = d.results.map(a=>({
+    allNewsArticles = dedupedResults.map(a=>({
       title: a.title,
       description: a.description || '',
       url: a.link,
