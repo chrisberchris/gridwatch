@@ -1356,11 +1356,9 @@ async function tryMediastackAPI(){
 }
 
 async function tryNewsDataAPI(){
-  // NewsData.io — free tier 200 req/day, CORS friendly
   const NEWSDATA_KEY = window.NEWSDATA_API_KEY || '';
   if(!NEWSDATA_KEY || NEWSDATA_KEY === 'YOUR_NEWSDATA_KEY_HERE') return false;
   try{
-    // Highly targeted data center queries
     const dcQueries = [
       'data center water',
       'data center electricity grid',
@@ -1371,30 +1369,22 @@ async function tryNewsDataAPI(){
     const allResults = [];
     for(const q of dcQueries){
       try{
-        const r2 = await fetch(`https://newsdata.io/api/1/news?apikey=${NEWSDATA_KEY}&q=${encodeURIComponent(q)}&language=en&country=us&category=technology,environment,politics`);
-        if(!r2.ok) continue;
-        const d2 = await r2.json();
-        if(d2.results) allResults.push(...d2.results);
+        const r = await fetch(`https://newsdata.io/api/1/news?apikey=${NEWSDATA_KEY}&q=${encodeURIComponent(q)}&language=en&country=us&category=technology,environment,politics`);
+        if(!r.ok) continue;
+        const d = await r.json();
+        if(d.results) allResults.push(...d.results);
       }catch(e2){ continue; }
     }
-    // Deduplicate
-    const seenIds = new Set();
-    const dedupedResults = allResults.filter(a=>{
-      if(!a.title||seenIds.has(a.title)) return false;
-      seenIds.add(a.title);
-      // Filter out unrelated articles
-      const text=(a.title+' '+(a.description||'')).toLowerCase();
-      const dcTerms=['data center','datacenter','hyperscale','colocation','server farm','cloud infrastructure'];
+    const seen = new Set();
+    const filtered = allResults.filter(a=>{
+      if(!a.title || seen.has(a.title)) return false;
+      seen.add(a.title);
+      const text = (a.title+' '+(a.description||'')).toLowerCase();
+      const dcTerms = ['data center','datacenter','hyperscale','colocation','server farm','cloud infrastructure'];
       return dcTerms.some(t=>text.includes(t));
     });
-    const url = null; // handled above
-    if(!dedupedResults.length) return false;
-    allNewsArticles = dedupedResults.map(a=>({
-    const r = await fetch(url);
-    if(!r.ok) return false;
-    const d = await r.json();
-    if(!d.results || !d.results.length) return false;
-    allNewsArticles = dedupedResults.map(a=>({
+    if(!filtered.length) return false;
+    allNewsArticles = filtered.map(a=>({
       title: a.title,
       description: a.description || '',
       url: a.link,
@@ -1410,11 +1400,69 @@ async function tryNewsDataAPI(){
 }
 
 
+async function tryCurrentsAPI(){
+  const CURRENTS_KEY = window.CURRENTS_API_KEY || '';
+  if(!CURRENTS_KEY || CURRENTS_KEY === 'YOUR_CURRENTS_KEY_HERE') return false;
+  try{
+    const url = `https://api.currentsapi.services/v1/search?keywords=data+center+hyperscale+water+grid&language=en&apiKey=${CURRENTS_KEY}`;
+    const r = await fetch(url);
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(!d.news || !d.news.length) return false;
+    const seen = new Set();
+    allNewsArticles = d.news.filter(a=>{
+      if(!a.title||seen.has(a.title))return false;
+      seen.add(a.title);
+      const text=(a.title+' '+(a.description||'')).toLowerCase();
+      return ['data center','datacenter','hyperscale','colocation','server farm'].some(t=>text.includes(t));
+    }).map(a=>({
+      title: a.title,
+      description: a.description,
+      url: a.url,
+      urlToImage: a.image !== 'None' ? a.image : null,
+      publishedAt: a.published,
+      source: a.author || 'News',
+      state: detectState((a.title||'')+' '+(a.description||'')),
+    })).sort((a,b)=>new Date(b.publishedAt)-new Date(a.publishedAt));
+    document.getElementById('news-api-notice').style.display='none';
+    renderNews();
+    return true;
+  }catch(e){ return false; }
+}
+
+async function tryMediastackAPI(){
+  const MEDIASTACK_KEY = window.MEDIASTACK_API_KEY || '';
+  if(!MEDIASTACK_KEY || MEDIASTACK_KEY === 'YOUR_MEDIASTACK_KEY_HERE') return false;
+  try{
+    const url = `http://api.mediastack.com/v1/news?access_key=${MEDIASTACK_KEY}&keywords=data center hyperscale&languages=en&limit=50&categories=technology,environment`;
+    const r = await fetch(url);
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(!d.data || !d.data.length) return false;
+    const seen = new Set();
+    allNewsArticles = d.data.filter(a=>{
+      if(!a.title||seen.has(a.title))return false;
+      seen.add(a.title);
+      const text=(a.title+' '+(a.description||'')).toLowerCase();
+      return ['data center','datacenter','hyperscale','colocation','server farm'].some(t=>text.includes(t));
+    }).map(a=>({
+      title: a.title,
+      description: a.description,
+      url: a.url,
+      urlToImage: a.image || null,
+      publishedAt: a.published_at,
+      source: a.source || 'News',
+      state: detectState((a.title||'')+' '+(a.description||'')),
+    })).sort((a,b)=>new Date(b.publishedAt)-new Date(a.publishedAt));
+    document.getElementById('news-api-notice').style.display='none';
+    renderNews();
+    return true;
+  }catch(e){ return false; }
+}
 
 function detectState(text){
   if(!text)return null;
   const t=text.toLowerCase();
-  // Check full state names and abbreviations
   const statePatterns=[
     ['Virginia','VA'],['Arizona','AZ'],['Oregon','OR'],['Nevada','NV'],['Washington','WA'],
     ['Iowa','IA'],['Ohio','OH'],['Tennessee','TN'],['Texas','TX'],['Illinois','IL'],
@@ -1459,19 +1507,16 @@ async function lookupReps(){
   if(zip.length!==5){showToast('Please enter a valid 5-digit zip code.');return}
 
   const btn=document.getElementById('zip-btn');
-  btn.disabled=true;btn.textContent='Looking up\u2026';
-  document.getElementById('rep-results').innerHTML='<div class="lookup-loading"><div class="spinner"></div><span>Finding your representatives\u2026</span></div>';
+  btn.disabled=true;btn.textContent='Looking up…';
+  document.getElementById('rep-results').innerHTML='<div class="lookup-loading"><div class="spinner"></div><span>Finding your representatives…</span></div>';
   setStep(2);
 
   try{
-    // Step 1: Convert ZIP to state + district using Census Geocoder (no key, CORS friendly)
     const geoUrl=`https://geocoding.geo.census.gov/geocoder/geographies/address?street=&city=&state=&zip=${zip}&benchmark=Public_AR_Current&vintage=Current_Current&layers=Congressional+Districts&format=json`;
     const geoRes=await fetch(geoUrl);
     const geoData=await geoRes.json();
-
     const matches=geoData?.result?.addressMatches||[];
     let stateAbbr='',district='';
-
     if(matches.length>0){
       const geos=matches[0].geographies;
       const cd=geos?.['Congressional Districts']?.[0];
@@ -1479,20 +1524,12 @@ async function lookupReps(){
       if(cd){district=cd.BASENAME||cd.NAME||''}
       if(state){stateAbbr=state.STUSAB||''}
     }
+    if(!stateAbbr){stateAbbr=zipToState(zip);}
 
-    if(!stateAbbr){
-      // Fallback: derive state from ZIP ranges
-      stateAbbr=zipToState(zip);
-    }
-
-    // Step 2: Fetch members from Congress.gov API
-    const CONGRESS_KEY=document.getElementById('congress-api-key')?.value||window.CONGRESS_API_KEY||'';
-
+    const CONGRESS_KEY=window.CONGRESS_API_KEY||'';
     let reps=[];
-    if(CONGRESS_KEY){
-      // Fetch senators for state
-      const senUrl=`https://api.congress.gov/v3/member?stateCode=${stateAbbr}&chamber=senate&currentMember=true&limit=5&api_key=${CONGRESS_KEY}`;
-      const senRes=await fetch(senUrl);
+    if(CONGRESS_KEY && CONGRESS_KEY!=='YOUR_CONGRESS_API_KEY_HERE'){
+      const senRes=await fetch(`https://api.congress.gov/v3/member?stateCode=${stateAbbr}&chamber=senate&currentMember=true&limit=5&api_key=${CONGRESS_KEY}`);
       const senData=await senRes.json();
       if(senData.members){
         senData.members.forEach(m=>{
@@ -1500,218 +1537,125 @@ async function lookupReps(){
             office:'U.S. Senate — '+stateAbbr,
             name:(m.name||'').replace(/,\s*/,', '),
             party:m.partyName||m.party||'',
-            photo:null,
-            phones:[],
-            urls:[m.officialWebsiteUrl||`https://www.congress.gov/member/${(m.name||'').replace(/\s+/g,'-').toLowerCase()}/${m.bioguideId}`],
-            address:'Washington, DC',
-            bioguideId:m.bioguideId||'',
+            photo:null,phones:[],
+            urls:[m.officialWebsiteUrl||`https://www.congress.gov/member/${m.bioguideId}`],
+            address:'Washington, DC',bioguideId:m.bioguideId||'',
           });
         });
       }
-
-      // Fetch house members for state
-      const houseUrl=`https://api.congress.gov/v3/member?stateCode=${stateAbbr}&chamber=house&currentMember=true&limit=20&api_key=${CONGRESS_KEY}`;
-      const houseRes=await fetch(houseUrl);
+      const distNum=district.replace(/\D/g,'')||'';
+      const houseRes=await fetch(`https://api.congress.gov/v3/member?stateCode=${stateAbbr}&chamber=house&currentMember=true&limit=20&api_key=${CONGRESS_KEY}`);
       const houseData=await houseRes.json();
       if(houseData.members){
-        // Filter to district if we have it
-        const distNum=district.replace(/\D/g,'')||'';
         houseData.members.forEach(m=>{
           if(distNum&&m.district&&String(m.district)!==distNum)return;
           reps.push({
             office:`U.S. House — ${stateAbbr} District ${m.district||'At Large'}`,
             name:(m.name||'').replace(/,\s*/,', '),
             party:m.partyName||m.party||'',
-            photo:null,
-            phones:[],
-            urls:[m.officialWebsiteUrl||`https://www.congress.gov/member/${(m.name||'').replace(/\s+/g,'-').toLowerCase()}/${m.bioguideId}`],
-            address:'Washington, DC',
-            bioguideId:m.bioguideId||'',
+            photo:null,phones:[],
+            urls:[m.officialWebsiteUrl||`https://www.congress.gov/member/${m.bioguideId}`],
+            address:'Washington, DC',bioguideId:m.bioguideId||'',
           });
         });
       }
     }
-
-    // Step 3: Always add state-level links and Governor
-    reps.push({
-      office:'Governor',
-      name:'Find Your Governor',
-      party:'',
-      photo:null,
-      phones:[],
-      urls:[`https://www.nga.org/governors/`],
-      address:'',
-      isLink:true,
-    });
-    reps.push({
-      office:'State Legislators',
-      name:'Find Your State Reps',
-      party:'',
-      photo:null,
-      phones:[],
-      urls:[`https://openstates.org/find_your_legislator/?address=${zip}`],
-      address:'',
-      isLink:true,
-    });
-
-    if(reps.length<=2){
-      // Only got generic links - show helpful fallback with state info
-      showManualFallback(zip, stateAbbr);
-      return;
-    }
-
+    reps.push({office:'Governor',name:'Find Your Governor',party:'',photo:null,phones:[],urls:['https://www.nga.org/governors/'],address:'',isLink:true});
+    reps.push({office:'State Legislators',name:'Find Your State Reps',party:'',photo:null,phones:[],urls:[`https://openstates.org/find_your_legislator/?address=${zip}`],address:'',isLink:true});
+    if(reps.length<=2){showManualFallback(zip,stateAbbr);return;}
     renderReps(reps);
     setStep(2);
-
   }catch(e){
     console.error('Rep lookup error:',e);
     showManualFallback(zip,'');
   }finally{
-    btn.disabled=false;btn.textContent='Look Up \u2192';
+    btn.disabled=false;btn.textContent='Look Up →';
   }
 }
 
 function zipToState(zip){
-  // ZIP code prefix to state mapping
   const z=parseInt(zip.slice(0,3));
-  if(z>=988&&z<=994)return'WA';
-  if(z>=995&&z<=999)return'AK';
-  if(z>=967&&z<=968)return'HI';
-  if(z>=969&&z<=969)return'GU';
-  if(z>=970&&z<=979)return'OR';
-  if(z>=980&&z<=987)return'WA';
-  if(z>=900&&z<=966)return'CA';
-  if(z>=850&&z<=865)return'AZ';
-  if(z>=870&&z<=884)return'NM';
-  if(z>=885&&z<=885)return'TX';
-  if(z>=730&&z<=749)return'OK';
-  if(z>=750&&z<=799)return'TX';
-  if(z>=800&&z<=816)return'CO';
-  if(z>=820&&z<=831)return'WY';
-  if(z>=832&&z<=838)return'ID';
-  if(z>=840&&z<=847)return'UT';
-  if(z>=889&&z<=899)return'NV';
-  if(z>=590&&z<=599)return'MT';
-  if(z>=570&&z<=577)return'SD';
-  if(z>=580&&z<=588)return'ND';
-  if(z>=550&&z<=567)return'MN';
-  if(z>=500&&z<=528)return'IA';
-  if(z>=530&&z<=549)return'WI';
-  if(z>=460&&z<=479)return'IN';
-  if(z>=480&&z<=499)return'MI';
-  if(z>=430&&z<=459)return'OH';
-  if(z>=400&&z<=427)return'KY';
-  if(z>=370&&z<=385)return'TN';
-  if(z>=350&&z<=369)return'AL';
-  if(z>=386&&z<=397)return'MS';
-  if(z>=700&&z<=714)return'LA';
-  if(z>=716&&z<=729)return'AR';
-  if(z>=630&&z<=658)return'MO';
-  if(z>=600&&z<=629)return'IL';
-  if(z>=660&&z<=679)return'KS';
-  if(z>=680&&z<=693)return'NE';
-  if(z>=303&&z<=319)return'GA';
-  if(z>=320&&z<=339)return'FL';
-  if(z>=270&&z<=289)return'NC';
-  if(z>=290&&z<=299)return'SC';
-  if(z>=240&&z<=246)return'VA';
-  if(z>=247&&z<=268)return'WV';
-  if(z>=200&&z<=212)return'DC';
-  if(z>=214&&z<=219)return'MD';
-  if(z>=220&&z<=239)return'VA';
-  if(z>=170&&z<=196)return'PA';
-  if(z>=197&&z<=199)return'DE';
-  if(z>=070&&z<=089)return'NJ';
-  if(z>=100&&z<=149)return'NY';
-  if(z>=150&&z<=168)return'PA';
-  if(z>=010&&z<=027)return'MA';
-  if(z>=028&&z<=029)return'RI';
-  if(z>=060&&z<=069)return'CT';
-  if(z>=030&&z<=038)return'NH';
-  if(z>=039&&z<=039)return'ME';
-  if(z>=040&&z<=049)return'ME';
-  if(z>=050&&z<=059)return'VT';
+  if(z>=988&&z<=994)return'WA';if(z>=995&&z<=999)return'AK';
+  if(z>=967&&z<=968)return'HI';if(z>=970&&z<=979)return'OR';
+  if(z>=980&&z<=987)return'WA';if(z>=900&&z<=966)return'CA';
+  if(z>=850&&z<=865)return'AZ';if(z>=870&&z<=884)return'NM';
+  if(z>=885&&z<=885)return'TX';if(z>=730&&z<=749)return'OK';
+  if(z>=750&&z<=799)return'TX';if(z>=800&&z<=816)return'CO';
+  if(z>=820&&z<=831)return'WY';if(z>=832&&z<=838)return'ID';
+  if(z>=840&&z<=847)return'UT';if(z>=889&&z<=899)return'NV';
+  if(z>=590&&z<=599)return'MT';if(z>=570&&z<=577)return'SD';
+  if(z>=580&&z<=588)return'ND';if(z>=550&&z<=567)return'MN';
+  if(z>=500&&z<=528)return'IA';if(z>=530&&z<=549)return'WI';
+  if(z>=460&&z<=479)return'IN';if(z>=480&&z<=499)return'MI';
+  if(z>=430&&z<=459)return'OH';if(z>=400&&z<=427)return'KY';
+  if(z>=370&&z<=385)return'TN';if(z>=350&&z<=369)return'AL';
+  if(z>=386&&z<=397)return'MS';if(z>=700&&z<=714)return'LA';
+  if(z>=716&&z<=729)return'AR';if(z>=630&&z<=658)return'MO';
+  if(z>=600&&z<=629)return'IL';if(z>=660&&z<=679)return'KS';
+  if(z>=680&&z<=693)return'NE';if(z>=303&&z<=319)return'GA';
+  if(z>=320&&z<=339)return'FL';if(z>=270&&z<=289)return'NC';
+  if(z>=290&&z<=299)return'SC';if(z>=240&&z<=246)return'VA';
+  if(z>=247&&z<=268)return'WV';if(z>=200&&z<=212)return'DC';
+  if(z>=214&&z<=219)return'MD';if(z>=220&&z<=239)return'VA';
+  if(z>=170&&z<=196)return'PA';if(z>=197&&z<=199)return'DE';
+  if(z>=70&&z<=89)return'NJ';if(z>=100&&z<=149)return'NY';
+  if(z>=150&&z<=168)return'PA';if(z>=10&&z<=27)return'MA';
+  if(z>=28&&z<=29)return'RI';if(z>=60&&z<=69)return'CT';
+  if(z>=30&&z<=38)return'NH';if(z>=40&&z<=59)return'ME';
+  if(z>=50&&z<=59)return'VT';
   return'';
 }
 
-function showManualFallback(zip, stateAbbr){
-  const stateName=Object.entries(STATE_ABBR).find(([k,v])=>v===stateAbbr)?.[0]||'your state';
+function showManualFallback(zip,stateAbbr){
   document.getElementById('rep-results').innerHTML=`
     <div style="background:var(--ink3);border:1px solid var(--rule2);padding:1.2rem;margin-bottom:0.75rem">
       <div style="font-family:var(--mono);font-size:0.6rem;color:var(--violet);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">
         ${stateAbbr?'Representatives for '+stateAbbr+' (ZIP '+zip+')':'Find Your Representatives'}
       </div>
       <p style="font-size:0.78rem;color:var(--soft);line-height:1.6;margin-bottom:1rem">
-        Use these official government links to find and contact your representatives, then copy your personalized letter from the right panel.
+        Use these official links to find your representatives, then copy your letter from the right panel.
       </p>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <a href="https://www.senate.gov/senators/senators-contact.htm" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">
-          \u2709 Find Your U.S. Senators \u2192 senate.gov
-        </a>
-        <a href="https://www.house.gov/representatives/find-your-representative?zip=${zip}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">
-          \u2709 Find Your U.S. House Rep (ZIP ${zip}) \u2192 house.gov
-        </a>
-        <a href="https://www.nga.org/governors/" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">
-          \u2709 Find Your Governor \u2192 nga.org
-        </a>
-        <a href="https://openstates.org/find_your_legislator/?address=${zip}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">
-          \u2709 Find Your State Legislators \u2192 openstates.org
-        </a>
+        <a href="https://www.senate.gov/senators/senators-contact.htm" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">✉ U.S. Senators → senate.gov</a>
+        <a href="https://www.house.gov/representatives/find-your-representative?zip=${zip}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">✉ U.S. House Rep (ZIP ${zip}) → house.gov</a>
+        <a href="https://www.nga.org/governors/" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">✉ Governor → nga.org</a>
+        <a href="https://openstates.org/find_your_legislator/?address=${zip}" target="_blank" class="rep-link contact" style="padding:8px 12px;font-size:0.75rem;display:block">✉ State Legislators → openstates.org</a>
       </div>
-      <p style="font-size:0.72rem;color:var(--mid);margin-top:0.75rem;line-height:1.5">
-        \u2139\ufe0f Your letter is ready on the right. Copy it and paste into any contact form above.
-      </p>
     </div>`;
   setStep(2);
 }
-
 
 function renderReps(reps){
   document.getElementById('rep-results').innerHTML=reps.map((rep,i)=>{
     const partyColor=rep.party.includes('Republican')?'var(--red)':rep.party.includes('Democrat')?'var(--sky)':'var(--mid)';
     const contactUrl=rep.urls[0]||null;
-    const phone=rep.phones[0]||null;
     return`<div class="rep-card${i===0?' selected':''}" id="rep-card-${i}" onclick="selectRep(${i},${JSON.stringify(rep).replace(/"/g,'&quot;')})">
-      ${rep.photo
-        ?`<img class="rep-photo" src="${rep.photo}" alt="${rep.name}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"/><div class="rep-photo-placeholder" style="display:none">👤</div>`
-        :`<div class="rep-photo-placeholder">👤</div>`}
+      <div class="rep-photo-placeholder">👤</div>
       <div class="rep-info">
         <div class="rep-office">${rep.office}</div>
         <div class="rep-name">${rep.name}</div>
-        <div class="rep-party" style="color:${partyColor}">${rep.party||'Party not listed'}</div>
+        <div class="rep-party" style="color:${partyColor}">${rep.party||''}</div>
         <div class="rep-links">
-          ${phone?`<a class="rep-link" href="tel:${phone}" onclick="event.stopPropagation()">📞 ${phone}</a>`:''}
           ${contactUrl?`<a class="rep-link contact" href="${contactUrl}" target="_blank" onclick="event.stopPropagation()">✉ Contact Form ↗</a>`:''}
         </div>
       </div>
     </div>`;
   }).join('');
-
-  // Auto-select first rep
-  if(reps.length>0){
-    selectRep(0,reps[0]);
-  }
+  if(reps.length>0){selectRep(0,reps[0]);}
 }
 
 function selectRep(idx,rep){
   document.querySelectorAll('.rep-card').forEach((c,i)=>c.classList.toggle('selected',i===idx));
   selectedRep=rep;
-  // Update letter salutation
   document.getElementById('c-rep-title').value=
-    rep.office.includes('Senate')&&rep.office.includes('United')?'U.S. Senator':
-    rep.office.includes('House')&&rep.office.includes('United')?'U.S. Representative':
-    rep.office.includes('Governor')?'Governor':
-    rep.office.includes('State Senate')?'State Senator':
-    rep.office.includes('State House')||rep.office.includes('State Assembly')?'State Representative':
-    'Representative';
-
-  // Show selected rep banner
+    rep.office.includes('Senate')?'U.S. Senator':
+    rep.office.includes('House')?'U.S. Representative':
+    rep.office.includes('Governor')?'Governor':'Representative';
   const banner=document.getElementById('selected-rep-banner');
   banner.style.display='flex';
   document.getElementById('srb-office').textContent=rep.office;
   document.getElementById('srb-name').textContent=rep.name;
-  buildLetter();
-  setStep(3);
+  buildLetter();setStep(3);
   showToast(`${rep.name} selected — letter updated!`);
 }
 
@@ -1719,13 +1663,11 @@ function clearSelectedRep(){
   selectedRep=null;
   document.getElementById('selected-rep-banner').style.display='none';
   document.querySelectorAll('.rep-card').forEach(c=>c.classList.remove('selected'));
-  setStep(2);
-  buildLetter();
+  setStep(2);buildLetter();
 }
 
 function showRepError(msg){
-  document.getElementById('rep-results').innerHTML=`<div class="lookup-error"><strong>Lookup failed</strong>${msg}</div>
-  <button class="btn-sec" style="margin-top:0.75rem" onclick="useFallbackLookup()">Use Manual State Lookup Instead →</button>`;
+  document.getElementById('rep-results').innerHTML=`<div class="lookup-error"><strong>Lookup failed</strong>${msg}</div>`;
   setStep(1);
 }
 
@@ -1741,18 +1683,15 @@ function showFallbackReps(){
   const abbr=STATE_ABBR[state]||'';
   document.getElementById('fallback-results').innerHTML=`
     <div style="background:var(--ink3);border:1px solid var(--rule2);padding:1rem;margin-top:0.75rem">
-      <div style="font-family:var(--mono);font-size:0.62rem;color:var(--violet);margin-bottom:8px;letter-spacing:0.08em;text-transform:uppercase">Find Your ${state} Representatives</div>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <a href="https://www.senate.gov/senators/senators-contact.htm" target="_blank" class="rep-link contact" style="padding:6px 10px;font-size:0.72rem">✉ US Senators for ${state} → senate.gov ↗</a>
-        <a href="https://www.house.gov/representatives/find-your-representative" target="_blank" class="rep-link contact" style="padding:6px 10px;font-size:0.72rem">✉ US House Representative → house.gov ↗</a>
-        <a href="https://www.nga.org/governors/" target="_blank" class="rep-link contact" style="padding:6px 10px;font-size:0.72rem">✉ Governor of ${state} → nga.org ↗</a>
+        <a href="https://www.senate.gov/senators/senators-contact.htm" target="_blank" class="rep-link contact" style="padding:6px 10px;font-size:0.72rem">✉ US Senators → senate.gov ↗</a>
+        <a href="https://www.house.gov/representatives/find-your-representative" target="_blank" class="rep-link contact" style="padding:6px 10px;font-size:0.72rem">✉ US House Rep → house.gov ↗</a>
+        <a href="https://www.nga.org/governors/" target="_blank" class="rep-link contact" style="padding:6px 10px;font-size:0.72rem">✉ Governor → nga.org ↗</a>
         <a href="https://openstates.org/${state.toLowerCase().replace(/ /g,'-')}/" target="_blank" class="rep-link contact" style="padding:6px 10px;font-size:0.72rem">✉ State Legislators → openstates.org ↗</a>
       </div>
-      <p style="font-size:0.72rem;color:var(--mid);margin-top:0.75rem;line-height:1.5">Generate your letter on the right → copy it → paste it into any of these contact forms.</p>
     </div>`;
   document.getElementById('c-state-letter').value=abbr;
-  buildLetter();
-  setStep(3);
+  buildLetter();setStep(3);
 }
 
 function setStep(n){
@@ -1763,7 +1702,6 @@ function setStep(n){
   });
 }
 
-// ── LETTER BUILDER ───────────────────────────────
 function buildLetter(){
   const fn=document.getElementById('c-fn').value||'[Your Name]';
   const ln=document.getElementById('c-ln').value||'';
@@ -1776,12 +1714,15 @@ function buildLetter(){
   const note=document.getElementById('c-note').value;
   const dc=contactDC;
   const today=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-  const cBlock=concerns.length?'\n\nMy specific concerns include:\n'+concerns.map(c=>`  • ${c.charAt(0).toUpperCase()+c.slice(1)}`).join('\n'):'';
-  const nBlock=note?`\n\n${note}`:'';
-  const fBlock=dc
-    ?`I write specifically regarding ${dc.name} (operated by ${dc.co}) in ${dc.city}, ${dc.state} — a ${dc.mw} MW facility.`
-    :`I write regarding the rapid expansion of large-scale data center infrastructure across our region.`;
+  const cBlock=concerns.length?'
 
+My specific concerns include:
+'+concerns.map(c=>`  • ${c.charAt(0).toUpperCase()+c.slice(1)}`).join('
+'):'';
+  const nBlock=note?`
+
+${note}`:'';
+  const fBlock=dc?`I write specifically regarding ${dc.name} (operated by ${dc.co}) in ${dc.city}, ${dc.state} — a ${dc.mw} MW facility.`:`I write regarding the rapid expansion of large-scale data center infrastructure across our region.`;
   document.getElementById('letter-preview').textContent=`${today}
 
 ${salutation}
@@ -1809,11 +1750,10 @@ ${city}, ${st}`;
 
 function copyLetter(){
   navigator.clipboard.writeText(document.getElementById('letter-preview').textContent);
-  showToast('Letter copied! Paste it into your representative\'s contact form.');
+  showToast('Letter copied! Paste it into your representative's contact form.');
   setStep(3);
 }
 
-// ── SUBMIT FACILITY ──────────────────────────────
 function openSubmit(){document.getElementById('modal-submit').classList.add('open')}
 function submitFacility(){
   if(!document.getElementById('s-name').value){showToast('Please enter a facility name.');return}
@@ -1821,19 +1761,16 @@ function submitFacility(){
   showToast('Submitted! Our team reviews within 48 hours. Thank you.');
 }
 
-// ── DONATE ───────────────────────────────────────
 function selAmt(el,val){document.querySelectorAll('.amt-btn').forEach(b=>b.classList.remove('sel'));el.classList.add('sel');document.getElementById('custom-amt').value=''}
 function selFreq(f){document.getElementById('freq-one').classList.toggle('sel',f==='one');document.getElementById('freq-monthly').classList.toggle('sel',f==='monthly')}
 function handleDonate(){
   const custom=document.getElementById('custom-amt').value;
   const amt=custom||document.querySelector('.amt-btn.sel')?.textContent.replace('$','')||'25';
   showToast(`Redirecting to Stripe for $${amt} donation…`);
-  // REPLACE WITH YOUR STRIPE PAYMENT LINK:
   // window.location.href='https://buy.stripe.com/YOUR_LINK_HERE';
 }
-function shareGridWatch(){navigator.clipboard.writeText('https://gridwatchmap.com — Free US Data Center Transparency Map');showToast('Link copied! Share GridWatch with others.')}
+function shareGridWatch(){navigator.clipboard.writeText('https://gridwatchmap.com — Free US Data Center Transparency Map');showToast('Link copied!')}
 
-// ── TICKER ───────────────────────────────────────
 function buildTicker(){
   const items=[
     {l:'NEW',t:'Project Ridge — 450 MW proposed Jackson County, WI'},
@@ -1850,7 +1787,6 @@ function buildTicker(){
   document.getElementById('ticker-track').innerHTML=all.map(i=>`<div class="ticker-item"><b>${i.l} —</b> ${i.t}</div>`).join('');
 }
 
-// ── NAV ──────────────────────────────────────────
 function nav(tab){
   ['map','news','contact','donate','about'].forEach(t=>{
     document.getElementById('tab-'+t).style.display=t===tab?'block':'none';
@@ -1860,15 +1796,10 @@ function nav(tab){
     b.classList.toggle('active',tabs[i]===tab);
   });
   window.scrollTo({top:0,behavior:'smooth'});
-  // Lazy load news when first opened
-  if(tab==='news'&&allNewsArticles.length===0){
-    fetchLiveNews();
-  }
-  // Init letter
+  if(tab==='news'&&allNewsArticles.length===0){fetchLiveNews();}
   if(tab==='contact') buildLetter();
 }
 
-// ── UTILS ────────────────────────────────────────
 function closeModal(id){document.getElementById(id).classList.remove('open')}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3200)}
 ['modal-submit'].forEach(id=>{document.getElementById(id).addEventListener('click',function(e){if(e.target===this)closeModal(id)})});
